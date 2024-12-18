@@ -1,0 +1,37 @@
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/led/led.h>
+
+/ {
+    cpus {
+        cpu@0 {
+            clock-frequency = <64000000>;
+        };
+    };
+	led_strip: ws2812 {
+		compatible = "worldsemi,ws2812-gpio";
+
+		chain-length = <150>; /* arbitrary; change at will */
+		color-mapping = <LED_COLOR_ID_GREEN
+				 LED_COLOR_ID_RED
+				 LED_COLOR_ID_BLUE>;
+		/* P0: */
+		gpios = <&xiao_d 2 GPIO_ACTIVE_HIGH>;
+        reset-delay = <3200>;
+
+        delay-t1h = <51>;
+        delay-t1l = <29>;
+        delay-t0h = <26>;
+        delay-t0l = <54>;
+	};
+
+    led_enable: led_enable {
+        compatible = "power-switch";
+		gpios = <&xiao_d 3 GPIO_ACTIVE_HIGH>;
+	};
+
+	aliases {
+		led-strip = &led_strip;
+	};
+
+
+};

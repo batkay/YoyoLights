@@ -1,5 +1,6 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/led/led.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 
 / {
     cpus {
@@ -29,8 +30,18 @@
 		gpios = <&xiao_d 3 GPIO_ACTIVE_HIGH>;
 	};
 
+	button0: button_0 {
+		
+		compatible = "gpio-keys";
+		button {
+			gpios = <&xiao_d 0 GPIO_ACTIVE_LOW>;
+		};
+	};
+
 	aliases {
 		led-strip = &led_strip;
+		led-enable = &led_enable;
+		sw0 = &button0;
 	};
 
 

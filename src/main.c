@@ -45,9 +45,9 @@ static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(BUTTON0, gpios, {0
 #define RGB(_r, _g, _b) { .r = (_r), .g = (_g), .b = (_b) }
 
 static const struct led_rgb colors[] = {
-	RGB(0x00, 0x00, 0x00), /* red */
+	RGB(0x01, 0x00, 0x00), /* red */
 	RGB(0x00, 0x01, 0x00), /* green */
-	RGB(0x00, 0x00, 0x00), /* blue */
+	RGB(0x00, 0x00, 0x01), /* blue */
 };
 
 static struct gpio_callback button_cb_data;
@@ -128,24 +128,62 @@ int main(void)
 	while (1) {
 		switch(currentState) {
 			case OFF:
+				gpio_pin_set_dt(&enable, GPIO_OUTPUT_INACTIVE);
+
+				memset(&pixels, 0x00, sizeof(pixels));
+				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+					memcpy(&pixels[cursor], &(struct led_rgb) RGB(0, 0, 0), sizeof(struct led_rgb));
+				}
+				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+				if (ret) {
+					printf("couldn't update strip: %d", ret);
+				}
+
+				
 				break;
 			case FIXED:
+				gpio_pin_set_dt(&enable, GPIO_OUTPUT_ACTIVE);
+				memset(&pixels, 0x00, sizeof(pixels));
+				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+					memcpy(&pixels[cursor], &colors[1], sizeof(struct led_rgb));
+				}
+				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+				if (ret) {
+					printf("couldn't update strip: %d", ret);
+				}
 				break;
 			case BLUETOOTH:
+				memset(&pixels, 0x00, sizeof(pixels));
+				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+					memcpy(&pixels[cursor], &colors[2], sizeof(struct led_rgb));
+				}
+				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+				if (ret) {
+					printf("couldn't update strip: %d", ret);
+				}
 				break;
 			case WAVE:
+				memset(&pixels, 0x00, sizeof(pixels));
+				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+					memcpy(&pixels[cursor], &colors[0], sizeof(struct led_rgb));
+				}
+				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+				if (ret) {
+					printf("couldn't update strip: %d", ret);
+				}
 				break;
 			case IMU:
+				memset(&pixels, 0x00, sizeof(pixels));
+				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+					memcpy(&pixels[cursor], &(struct led_rgb) RGB(1, 1, 0), sizeof(struct led_rgb));
+				}
+				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+				if (ret) {
+					printf("couldn't update strip: %d", ret);
+				}
 				break;
 		}
-		memset(&pixels, 0x00, sizeof(pixels));
-		for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
-			memcpy(&pixels[cursor], &colors[1], sizeof(struct led_rgb));
-		}
-		ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
-		if (ret) {
-			printf("couldn't update strip: %d", ret);
-		}
+		
 
 		k_sleep(DELAY_TIME);
 	}

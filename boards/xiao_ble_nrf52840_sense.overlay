@@ -30,10 +30,10 @@
 		gpios = <&xiao_d 3 GPIO_ACTIVE_HIGH>;
 	};
 
-	button0: button_0 {
+	buttons {
 		
 		compatible = "gpio-keys";
-		button {
+		button0: button_0 {
 			gpios = <&xiao_d 0 GPIO_ACTIVE_LOW>;
 		};
 	};

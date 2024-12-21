@@ -16,9 +16,12 @@ LOG_MODULE_REGISTER(main);
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/led_strip.h>
 #include <zephyr/device.h>
-#include <zephyr/drivers/spi.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/poweroff.h>
+#include <zephyr/pm/device.h>
+#include <zephyr/drivers/timer/nrf_grtc_timer.h>
+#define DEEP_SLEEP_TIME_S 2
 
 // Define Devicetree Aliases
 #define STRIP_NODE		DT_ALIAS(led_strip)
@@ -89,6 +92,7 @@ void buttonPressed(const struct device *dev, struct gpio_callback *cb, uint32_t 
 int main(void)
 {
 	int ret;
+	const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 
 	if (!gpio_is_ready_dt(&enable)) {
 		printf("LED enable is not ready");
@@ -101,17 +105,21 @@ int main(void)
 		return 0;
 	}
 
-	ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
+	ret = gpio_pin_configure_dt(&button, (GPIO_INPUT));
 	if (ret) {
 		printk("Error %d: failed to configure button", ret);
 		return 0;
 	}
 
-	ret = gpio_pin_interrupt_configure_dt(&button, GPIO_INT_EDGE_TO_ACTIVE);
+	// ret = gpio_pin_interrupt_configure_dt(&button, 	GPIO_INT_LEVEL_ACTIVE);
+	// GPIO_INT_EDGE_TO_ACTIVE
+	// GPIO_INT_WAKEUP
+	ret = gpio_pin_interrupt_configure_dt(&button, ( GPIO_INT_EDGE_TO_ACTIVE));
 	if (ret) {
 		printf("Could not configure sw0 GPIO interrupt (%d)\n", ret);
 		return 0;
 	}
+
 	gpio_init_callback(&button_cb_data, buttonPressed, BIT(button.pin));
 	gpio_add_callback(button.port, &button_cb_data);
 	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
@@ -138,8 +146,19 @@ int main(void)
 				if (ret) {
 					printf("couldn't update strip: %d", ret);
 				}
+				ret = gpio_pin_interrupt_configure_dt(&button, 	GPIO_INT_LEVEL_ACTIVE);
+				if (ret) {
+					printf("Could not configure sw0 GPIO interrupt (%d)\n", ret);
+					return 0;
+				}
 
-				
+				ret = pm_device_action_run(cons, PM_DEVICE_ACTION_SUSPEND);	
+				if (ret) {
+					printf("Could not suspend console (%d)\n", RTC_EVENTS_TICK_EVENTS_TICK_Pos);
+					// return 0;
+				}
+				printf("Sleep");
+				sys_poweroff();
 				break;
 			case FIXED:
 				gpio_pin_set_dt(&enable, GPIO_OUTPUT_ACTIVE);

@@ -4,6 +4,7 @@
 
 / {
     cpus {
+		// needed for correct ws2812 timing
         cpu@0 {
             clock-frequency = <64000000>;
         };
@@ -31,8 +32,9 @@
 	};
 
 	buttons {
-		
 		compatible = "gpio-keys";
+		no-disconnect;
+		debounce-interval-ms = <0>;
 		button0: button_0 {
 			gpios = <&xiao_d 0 GPIO_ACTIVE_LOW>;
 		};

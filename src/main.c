@@ -21,6 +21,8 @@ LOG_MODULE_REGISTER(main);
 #include <zephyr/sys/poweroff.h>
 #include <zephyr/pm/device.h>
 #include <zephyr/drivers/timer/nrf_grtc_timer.h>
+#include <zephyr/drivers/sensor.h>
+
 #define DEEP_SLEEP_TIME_S 2
 
 // Define Devicetree Aliases
@@ -97,10 +99,42 @@ void buttonPressed(const struct device *dev, struct gpio_callback *cb, uint32_t 
 	currentState = nextState(currentState);
 }
 
+static void lsm6dsl_trigger_handler(const struct device *dev,
+				    const struct sensor_trigger *trig)
+{
+	static struct sensor_value accel_x, accel_y, accel_z;
+	static struct sensor_value gyro_x, gyro_y, gyro_z;
+
+	sensor_sample_fetch_chan(dev, SENSOR_CHAN_ACCEL_XYZ);
+	sensor_channel_get(dev, SENSOR_CHAN_ACCEL_X, &accel_x);
+	sensor_channel_get(dev, SENSOR_CHAN_ACCEL_Y, &accel_y);
+	sensor_channel_get(dev, SENSOR_CHAN_ACCEL_Z, &accel_z);
+
+	/* lsm6dsl gyro */
+	sensor_sample_fetch_chan(dev, SENSOR_CHAN_GYRO_XYZ);
+	sensor_channel_get(dev, SENSOR_CHAN_GYRO_X, &gyro_x);
+	sensor_channel_get(dev, SENSOR_CHAN_GYRO_Y, &gyro_y);
+	sensor_channel_get(dev, SENSOR_CHAN_GYRO_Z, &gyro_z);
+
+	if (update_values) {
+		accel_x_out = accel_x;
+		accel_y_out = accel_y;
+		accel_z_out = accel_z;
+
+		gyro_x_out = gyro_x;
+		gyro_y_out = gyro_y;
+		gyro_z_out = gyro_z;
+
+		update_values = false;
+	}
+}
+
 int main(void)
 {
 	int ret;
+
 	const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+	const struct device *const lsm6dsl_dev = DEVICE_DT_GET_ONE(st_lsm6dsl);
 
 	if (!gpio_is_ready_dt(&enable)) {
 		printf("LED enable is not ready");
@@ -136,6 +170,48 @@ int main(void)
 		return 0;
 	}
 
+
+	if (!device_is_ready(lsm6dsl_dev)) {
+		printk("sensor: device not ready.\n");
+		return 0;
+	}
+
+
+	struct sensor_value odr_attr;
+	/* set accel/gyro sampling frequency to 104 Hz */
+	odr_attr.val1 = 104;
+	odr_attr.val2 = 0;
+
+	ret = sensor_attr_set(lsm6dsl_dev, SENSOR_CHAN_ACCEL_XYZ,
+			    SENSOR_ATTR_SAMPLING_FREQUENCY, &odr_attr);
+	if (ret) {
+		printk("Cannot set sampling frequency for accelerometer.\n");
+		return 0;
+	}
+
+	ret = sensor_attr_set(lsm6dsl_dev, SENSOR_CHAN_GYRO_XYZ,
+			    SENSOR_ATTR_SAMPLING_FREQUENCY, &odr_attr);
+	if (ret) {
+		printk("Cannot set sampling frequency for gyro.\n");
+		return 0;
+	}
+
+	struct sensor_trigger trig;
+
+	trig.type = SENSOR_TRIG_DATA_READY;
+	trig.chan = SENSOR_CHAN_ACCEL_XYZ;
+
+	if (sensor_trigger_set(lsm6dsl_dev, &trig, lsm6dsl_trigger_handler) != 0) {
+		printk("Could not set sensor type and channel\n");
+		return 0;
+	}
+
+	if (sensor_sample_fetch(lsm6dsl_dev) < 0) {
+		printk("Sensor sample update error\n");
+		return 0;
+	}
+
+	int idx = 0;
 
 	printf("Displaying pattern on strip");
 	while (1) {
@@ -188,23 +264,40 @@ int main(void)
 				break;
 			case WAVE:
 				memset(&pixels, 0x00, sizeof(pixels));
-				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
-					memcpy(&pixels[cursor], &colors[0], sizeof(struct led_rgb));
+				size_t cursor = 0;
+				for (; cursor < (idx % STRIP_NUM_PIXELS); cursor++) {
+					memcpy(&pixels[cursor], &colors[idx/STRIP_NUM_PIXELS], sizeof(struct led_rgb));
 				}
+				for (; cursor < STRIP_NUM_PIXELS; cursor++) {
+					memcpy(&pixels[cursor], &colors[((idx)/STRIP_NUM_PIXELS + ARRAY_SIZE(colors) - 1) % ARRAY_SIZE(colors)], sizeof(struct led_rgb));
+				}
+
 				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
 				if (ret) {
 					printf("couldn't update strip: %d", ret);
 				}
+
+				idx = (idx + 1) % (3 * STRIP_NUM_PIXELS);
 				break;
 			case IMU:
 				memset(&pixels, 0x00, sizeof(pixels));
 				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
-					memcpy(&pixels[cursor], &(struct led_rgb) RGB(1, 1, 0), sizeof(struct led_rgb));
+					memcpy(&pixels[cursor], &(struct led_rgb) RGB(25, 25, 0), sizeof(struct led_rgb));
 				}
 				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
 				if (ret) {
 					printf("couldn't update strip: %d", ret);
 				}
+
+				printf("accel x:%f ms/2 y:%f ms/2 z:%f ms/2\n",
+											sensor_value_to_double(&accel_x_out),
+											sensor_value_to_double(&accel_y_out),
+											sensor_value_to_double(&accel_z_out));
+				// printf("gyro x:%f dps y:%f dps z:%f dps\n",
+				// 			   sensor_value_to_double(&gyro_x_out),
+				// 			   sensor_value_to_double(&gyro_y_out),
+				// 			   sensor_value_to_double(&gyro_z_out));
+				update_values = true;
 				break;
 		}
 		

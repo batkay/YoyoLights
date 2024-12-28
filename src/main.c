@@ -8,6 +8,7 @@
 
 #include <errno.h>
 #include <string.h>
+#include <math.h>
 
 #define LOG_LEVEL 4
 #include <zephyr/logging/log.h>
@@ -22,6 +23,8 @@ LOG_MODULE_REGISTER(main);
 #include <zephyr/pm/device.h>
 #include <zephyr/drivers/timer/nrf_grtc_timer.h>
 #include <zephyr/drivers/sensor.h>
+
+#include "orientation.h"
 
 #define DEEP_SLEEP_TIME_S 2
 
@@ -44,9 +47,11 @@ static const struct device *const strip = DEVICE_DT_GET(STRIP_NODE);
 static const struct gpio_dt_spec enable = GPIO_DT_SPEC_GET(LED_ENABLE, gpios);
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(BUTTON0, gpios, {0});
 
-static struct sensor_value accel_x_out, accel_y_out, accel_z_out;
-static struct sensor_value gyro_x_out, gyro_y_out, gyro_z_out;
+// static struct sensor_value accel_x_out, accel_y_out, accel_z_out;
+// static struct sensor_value gyro_x_out, gyro_y_out, gyro_z_out;
+static double pitch_out, yaw_out, roll_out;
 static bool update_values;
+static bool orientationInit;
 
 // static const struct gpio_dt_spec enable =
 // 	GPIO_DT_SPEC_GET_OR(DT_NODELABEL(led_enable), gpios, {0});
@@ -99,6 +104,7 @@ void buttonPressed(const struct device *dev, struct gpio_callback *cb, uint32_t 
 	currentState = nextState(currentState);
 }
 
+
 static void lsm6dsl_trigger_handler(const struct device *dev,
 				    const struct sensor_trigger *trig)
 {
@@ -116,14 +122,36 @@ static void lsm6dsl_trigger_handler(const struct device *dev,
 	sensor_channel_get(dev, SENSOR_CHAN_GYRO_Y, &gyro_y);
 	sensor_channel_get(dev, SENSOR_CHAN_GYRO_Z, &gyro_z);
 
-	if (update_values) {
-		accel_x_out = accel_x;
-		accel_y_out = accel_y;
-		accel_z_out = accel_z;
+	double accYval = sensor_value_to_double(&accel_y);
+	double accXval = sensor_value_to_double(&accel_x);
+	double accZval = sensor_value_to_double(&accel_z);
 
-		gyro_x_out = gyro_x;
-		gyro_y_out = gyro_y;
-		gyro_z_out = gyro_z;
+	double pitch = atan2(accYval, accZval);
+	double roll = atan2(accXval, accZval);
+	double yaw = atan2(accXval, accYval);
+
+	if (!orientationInit) {
+		initialize(pitch, roll, yaw);
+		orientationInit = true;
+	}
+	else {
+		update_pitch(pitch, sensor_value_to_double(&gyro_x), 0/104.0);
+		update_roll(roll, sensor_value_to_double(&gyro_x), 0/104.0);
+		update_yaw(yaw, sensor_value_to_double(&gyro_x), 0/104.0);
+	}
+
+	if (update_values) {
+		// accel_x_out = accel_x;
+		// accel_y_out = accel_y;
+		// accel_z_out = accel_z;
+
+		// gyro_x_out = gyro_x;
+		// gyro_y_out = gyro_y;
+		// gyro_z_out = gyro_z;
+
+		pitch_out = get_pitch();
+		yaw_out = get_yaw();
+		roll_out = get_roll();
 
 		update_values = false;
 	}
@@ -136,6 +164,7 @@ int main(void)
 	const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 	const struct device *const lsm6dsl_dev = DEVICE_DT_GET_ONE(st_lsm6dsl);
 
+	// setup load switch GPIO
 	if (!gpio_is_ready_dt(&enable)) {
 		printf("LED enable is not ready");
 		return 0;
@@ -147,6 +176,7 @@ int main(void)
 		return 0;
 	}
 
+	// Setup user push button
 	ret = gpio_pin_configure_dt(&button, (GPIO_INPUT));
 	if (ret) {
 		printk("Error %d: failed to configure button", ret);
@@ -163,6 +193,7 @@ int main(void)
 	gpio_add_callback(button.port, &button_cb_data);
 	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
 
+	// Setup LED Strip
 	if (device_is_ready(strip)) {
 		printf("Found LED strip device %s", strip->name);
 	} else {
@@ -171,11 +202,13 @@ int main(void)
 	}
 
 
+	// Setup IMU
 	if (!device_is_ready(lsm6dsl_dev)) {
 		printk("sensor: device not ready.\n");
 		return 0;
 	}
 
+	orientationInit = false;
 
 	struct sensor_value odr_attr;
 	/* set accel/gyro sampling frequency to 104 Hz */
@@ -289,14 +322,16 @@ int main(void)
 					printf("couldn't update strip: %d", ret);
 				}
 
-				printf("accel x:%f ms/2 y:%f ms/2 z:%f ms/2\n",
-											sensor_value_to_double(&accel_x_out),
-											sensor_value_to_double(&accel_y_out),
-											sensor_value_to_double(&accel_z_out));
-				// printf("gyro x:%f dps y:%f dps z:%f dps\n",
+				// printf("accel x:%f ms/2 y:%f ms/2 z:%f ms/2",
+				// 							sensor_value_to_double(&accel_x_out),
+				// 							sensor_value_to_double(&accel_y_out),
+				// 							sensor_value_to_double(&accel_z_out));
+				// printf(" gyro x:%f dps y:%f dps z:%f dps\n",
 				// 			   sensor_value_to_double(&gyro_x_out),
 				// 			   sensor_value_to_double(&gyro_y_out),
 				// 			   sensor_value_to_double(&gyro_z_out));
+
+				printf("%f, %f, %f\n", pitch_out, yaw_out, roll_out);
 				update_values = true;
 				break;
 		}

@@ -1,3 +1,4 @@
+#pragma once
 
 void initialize(double initial_pitch, double initial_roll, double initial_yaw);
 void update_pitch(double acc, double gyro, double dt);

@@ -25,6 +25,7 @@ LOG_MODULE_REGISTER(main);
 #include <zephyr/drivers/sensor.h>
 
 #include "orientation.h"
+#include "hsv2rgb.h"
 
 #define DEEP_SLEEP_TIME_S 2
 
@@ -300,12 +301,17 @@ int main(void)
 				break;
 			case WAVE:
 				memset(&pixels, 0x00, sizeof(pixels));
-				size_t cursor = 0;
-				for (; cursor < (idx % STRIP_NUM_PIXELS); cursor++) {
-					memcpy(&pixels[cursor], &colors[idx/STRIP_NUM_PIXELS], sizeof(struct led_rgb));
-				}
-				for (; cursor < STRIP_NUM_PIXELS; cursor++) {
-					memcpy(&pixels[cursor], &colors[((idx)/STRIP_NUM_PIXELS + ARRAY_SIZE(colors) - 1) % ARRAY_SIZE(colors)], sizeof(struct led_rgb));
+				// size_t cursor = 0;
+				// for (; cursor < (idx % STRIP_NUM_PIXELS); cursor++) {
+				// 	memcpy(&pixels[cursor], &colors[idx/STRIP_NUM_PIXELS], sizeof(struct led_rgb));
+				// }
+				// for (; cursor < STRIP_NUM_PIXELS; cursor++) {
+				// 	memcpy(&pixels[cursor], &colors[((idx)/STRIP_NUM_PIXELS + ARRAY_SIZE(colors) - 1) % ARRAY_SIZE(colors)], sizeof(struct led_rgb));
+				// }
+
+				for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
+					bluetoothColor = hsv2rgb((cursor + idx) % 360, 100, (MAX_BRIGHTNESS)/255.0 * 100);
+					memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
 				}
 
 				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
@@ -313,12 +319,22 @@ int main(void)
 					printf("couldn't update strip: %d", ret);
 				}
 
-				idx = (idx + 1) % (3 * STRIP_NUM_PIXELS);
+				// idx = (idx + 1) % (3 * STRIP_NUM_PIXELS);
+				idx = (idx + 8) % 360;
 				break;
 			case IMU:
+				double rotation_magnitude = sqrt(pow(get_delta_pitch(), 2) + pow(get_delta_roll(), 2));
+				
+				if (rotation_magnitude > 1) {
+					idx += (int) rotation_magnitude;
+					idx = idx % (360);
+				}
+
+				bluetoothColor = hsv2rgb(idx, 100, (MAX_BRIGHTNESS)/255.0 * 100);
+
 				memset(&pixels, 0x00, sizeof(pixels));
 				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
-					memcpy(&pixels[cursor], &(struct led_rgb) RGB(25, 25, 0), sizeof(struct led_rgb));
+					memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
 				}
 				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
 				if (ret) {

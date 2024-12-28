@@ -48,7 +48,8 @@ static const struct gpio_dt_spec enable = GPIO_DT_SPEC_GET(LED_ENABLE, gpios);
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(BUTTON0, gpios, {0});
 
 // static struct sensor_value accel_x_out, accel_y_out, accel_z_out;
-// static struct sensor_value gyro_x_out, gyro_y_out, gyro_z_out;
+static struct sensor_value gyro_x_out, gyro_y_out, gyro_z_out;
+static uint32_t prevTimeMs;
 static double pitch_out, yaw_out, roll_out;
 static bool update_values;
 static bool orientationInit;
@@ -108,6 +109,7 @@ void buttonPressed(const struct device *dev, struct gpio_callback *cb, uint32_t 
 static void lsm6dsl_trigger_handler(const struct device *dev,
 				    const struct sensor_trigger *trig)
 {
+	uint32_t currTimeMs = k_uptime_get_32();
 	static struct sensor_value accel_x, accel_y, accel_z;
 	static struct sensor_value gyro_x, gyro_y, gyro_z;
 
@@ -116,29 +118,30 @@ static void lsm6dsl_trigger_handler(const struct device *dev,
 	sensor_channel_get(dev, SENSOR_CHAN_ACCEL_Y, &accel_y);
 	sensor_channel_get(dev, SENSOR_CHAN_ACCEL_Z, &accel_z);
 
-	/* lsm6dsl gyro */
+	// x -> pitch, y -> roll, z -> yaw
 	sensor_sample_fetch_chan(dev, SENSOR_CHAN_GYRO_XYZ);
 	sensor_channel_get(dev, SENSOR_CHAN_GYRO_X, &gyro_x);
 	sensor_channel_get(dev, SENSOR_CHAN_GYRO_Y, &gyro_y);
 	sensor_channel_get(dev, SENSOR_CHAN_GYRO_Z, &gyro_z);
 
-	double accYval = sensor_value_to_double(&accel_y);
-	double accXval = sensor_value_to_double(&accel_x);
-	double accZval = sensor_value_to_double(&accel_z);
+	double accYval = sensor_value_to_double(&accel_y) * 3.1415 / 180.0;
+	double accXval = sensor_value_to_double(&accel_x) * 3.1415 / 180.0;
+	double accZval = sensor_value_to_double(&accel_z) * 3.1415 / 180.0;
 
 	double pitch = atan2(accYval, accZval);
 	double roll = atan2(accXval, accZval);
-	double yaw = atan2(accXval, accYval);
 
 	if (!orientationInit) {
-		initialize(pitch, roll, yaw);
+		initialize(pitch, roll, 0.0);
 		orientationInit = true;
 	}
 	else {
-		update_pitch(pitch, sensor_value_to_double(&gyro_x), 0/104.0);
-		update_roll(roll, sensor_value_to_double(&gyro_x), 0/104.0);
-		update_yaw(yaw, sensor_value_to_double(&gyro_x), 0/104.0);
+		update_pitch(pitch, sensor_value_to_double(&gyro_x), (currTimeMs - prevTimeMs)/1000.0);
+		update_roll(roll, sensor_value_to_double(&gyro_y), (currTimeMs - prevTimeMs)/1000.0);
+		update_yaw(sensor_value_to_double(&gyro_z), (currTimeMs - prevTimeMs)/1000.0);
 	}
+
+	prevTimeMs = currTimeMs;
 
 	if (update_values) {
 		// accel_x_out = accel_x;
@@ -149,9 +152,9 @@ static void lsm6dsl_trigger_handler(const struct device *dev,
 		// gyro_y_out = gyro_y;
 		// gyro_z_out = gyro_z;
 
-		pitch_out = get_pitch();
-		yaw_out = get_yaw();
-		roll_out = get_roll();
+		// pitch_out = get_pitch();
+		// yaw_out = get_yaw();
+		// roll_out = get_roll();
 
 		update_values = false;
 	}
@@ -326,12 +329,13 @@ int main(void)
 				// 							sensor_value_to_double(&accel_x_out),
 				// 							sensor_value_to_double(&accel_y_out),
 				// 							sensor_value_to_double(&accel_z_out));
-				// printf(" gyro x:%f dps y:%f dps z:%f dps\n",
+				// printf("x:%f,y:%f,z:%f\n",
 				// 			   sensor_value_to_double(&gyro_x_out),
 				// 			   sensor_value_to_double(&gyro_y_out),
 				// 			   sensor_value_to_double(&gyro_z_out));
 
-				printf("%f, %f, %f\n", pitch_out, yaw_out, roll_out);
+				// printf("Pitch:%f,Yaw:%f,Roll:%f\n", pitch_out, yaw_out, roll_out);
+				printf("Pitch:%f,Yaw:%f,Roll:%f\n", get_delta_pitch(), get_delta_yaw(), get_delta_roll());
 				update_values = true;
 				break;
 		}

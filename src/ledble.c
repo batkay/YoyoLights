@@ -3,7 +3,7 @@
 #include <zephyr/drivers/led_strip.h>
 
 
-struct led_rgb saved_color;
+static volatile struct led_rgb saved_color;
 static bool updated;
 
 int led_service_init(void)
@@ -13,13 +13,16 @@ int led_service_init(void)
     saved_color.b = 0x25;
     saved_color.r = 0;
     saved_color.g = 0;
-    updated = false;
+    updated = true;
 
     return err;
 }
 
 void get_led_data(struct led_rgb *buf) {
-    memcpy(buf, &saved_color, sizeof(struct led_rgb));
+    // memcpy(buf, &saved_color, sizeof(struct led_rgb));
+    buf->r = saved_color.r;
+    buf->g = saved_color.g;
+    buf->b = saved_color.b;
 }
 bool get_updated() {
     if (updated) {
@@ -38,9 +41,14 @@ ssize_t on_receive(struct bt_conn *conn,
 			  uint16_t offset,
 			  uint8_t flags)
 {
-    uint8_t *value = attr->user_data;
-    
-    memcpy(value, &saved_color, len);
+    uint8_t *value = buf;
+    if (len != sizeof(saved_color)) {
+        return len;
+    }
+    // memcpy(&saved_color, value, sizeof(saved_color));
+    saved_color.r = value[1];
+    saved_color.g = value[2];
+    saved_color.b = value[3];
     updated = true;
     return len;
 }

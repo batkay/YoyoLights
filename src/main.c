@@ -54,7 +54,7 @@ static K_SEM_DEFINE(ble_init_ok, 0, 1);
 
 bool update = false;
 
-#define CONFIG_SAMPLE_LED_UPDATE_DELAY 1000
+#define CONFIG_SAMPLE_LED_UPDATE_DELAY 50
 #define DELAY_TIME K_MSEC(CONFIG_SAMPLE_LED_UPDATE_DELAY)
 
 #define LED_ENABLE DT_ALIAS(led_enable)
@@ -84,7 +84,7 @@ static bool orientationInit;
 // 	RGB(0x00, 0x00, MAX_BRIGHTNESS)
 // };
 static const struct led_rgb red = RGB(MAX_BRIGHTNESS, 0x00, 0x00);
-static struct led_rgb bluetoothColor = RGB(0x00, 0x00, MAX_BRIGHTNESS);
+static volatile struct led_rgb bluetoothColor = RGB(0x00, 0x00, MAX_BRIGHTNESS);
 
 static struct gpio_callback button_cb_data;
 
@@ -182,6 +182,15 @@ static void lsm6dsl_trigger_handler(const struct device *dev,
 #define DEVICE_NAME CONFIG_BT_DEVICE_NAME
 #define DEVICE_LEN (sizeof(DEVICE_NAME)-1)
 
+static const struct bt_data ad[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, LED_SERVICE),
+};
+
+static const struct bt_data sd[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
@@ -194,6 +203,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	printk("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
+	// bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad),
+	// 		      sd, ARRAY_SIZE(sd));
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
@@ -201,20 +212,12 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.disconnected = disconnected,
 };
 
-static const struct bt_data ad[] = {
-	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL, LED_SERVICE),
-};
-
-static const struct bt_data sd[] = {
-	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
-};
 
 BT_GATT_SERVICE_DEFINE(led_service,
 	BT_GATT_PRIMARY_SERVICE(RX_CHARACTERISTIC_UUID),
 	BT_GATT_CHARACTERISTIC(LED_SERVICE_UUID,
 			       BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       BT_GATT_PERM_WRITE,
 			       NULL, on_receive, NULL),
 );
 
@@ -265,13 +268,12 @@ int main(void)
 {
 	int err = 0;
 
-	err = bt_enable(NULL);
+	err = bt_enable(bt_ready);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
 		return 0;
 	}
 
-	bt_ready();
 	err = k_sem_take(&ble_init_ok, K_MSEC(500));
 
 	if (err) {
@@ -374,11 +376,11 @@ int main(void)
 	k_sleep(DELAY_TIME);
 	gpio_pin_set_dt(&enable, GPIO_OUTPUT_ACTIVE);
 	
-					memset(&pixels, 0x00, sizeof(pixels));
-				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
-					memcpy(&pixels[cursor], &red, sizeof(struct led_rgb));
-				}
-				update = true;
+	memset(&pixels, 0x00, sizeof(pixels));
+	for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+		memcpy(&pixels[cursor], &red, sizeof(struct led_rgb));
+	}
+	update = true;
 	int idx = 0;
 
 	bool btOn = true;
@@ -416,6 +418,11 @@ int main(void)
 				break;
 			case BLUETOOTH:
 				if (get_updated()) {
+					// printf("New Color");
+
+					get_led_data(&bluetoothColor);
+
+					printk("r: %i g: %i b: %i", bluetoothColor.r, bluetoothColor.g, bluetoothColor.b);
 					memset(&pixels, 0x00, sizeof(pixels));
 					for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
 						memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));

@@ -10,9 +10,7 @@
 #include <string.h>
 #include <math.h>
 
-#define LOG_LEVEL 4
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(main);
 
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/led_strip.h>
@@ -23,11 +21,19 @@ LOG_MODULE_REGISTER(main);
 #include <zephyr/pm/device.h>
 #include <zephyr/drivers/timer/nrf_grtc_timer.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/uuid.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/settings/settings.h>
+#include <zephyr/sys/printk.h>
+#include <zephyr/sys/byteorder.h>
+
 
 #include "orientation.h"
 #include "hsv2rgb.h"
-
-#define DEEP_SLEEP_TIME_S 2
+#include "ledble.h"
 
 // Define Devicetree Aliases
 #define STRIP_NODE		DT_ALIAS(led_strip)
@@ -38,7 +44,17 @@ LOG_MODULE_REGISTER(main);
 #error Unable to determine length of LED strip
 #endif
 
-#define CONFIG_SAMPLE_LED_UPDATE_DELAY 50
+/* size of stack area used by each thread */
+#define STACKSIZE 1024
+
+/* scheduling priority used by each thread */
+#define PRIORITY 18
+
+static K_SEM_DEFINE(ble_init_ok, 0, 1);
+
+bool update = false;
+
+#define CONFIG_SAMPLE_LED_UPDATE_DELAY 1000
 #define DELAY_TIME K_MSEC(CONFIG_SAMPLE_LED_UPDATE_DELAY)
 
 #define LED_ENABLE DT_ALIAS(led_enable)
@@ -49,9 +65,9 @@ static const struct gpio_dt_spec enable = GPIO_DT_SPEC_GET(LED_ENABLE, gpios);
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(BUTTON0, gpios, {0});
 
 // static struct sensor_value accel_x_out, accel_y_out, accel_z_out;
-static struct sensor_value gyro_x_out, gyro_y_out, gyro_z_out;
+// static struct sensor_value gyro_x_out, gyro_y_out, gyro_z_out;
 static uint32_t prevTimeMs;
-static double pitch_out, yaw_out, roll_out;
+// static double pitch_out, yaw_out, roll_out;
 static bool update_values;
 static bool orientationInit;
 
@@ -62,11 +78,11 @@ static bool orientationInit;
 // Create RGB Colors
 #define RGB(_r, _g, _b) { .r = (_r), .g = (_g), .b = (_b) }
 
-static const struct led_rgb colors[] = {
-	RGB(MAX_BRIGHTNESS, 0x00, 0x00),
-	RGB(0x00, MAX_BRIGHTNESS, 0x00),
-	RGB(0x00, 0x00, MAX_BRIGHTNESS)
-};
+// static const struct led_rgb colors[] = {
+// 	RGB(MAX_BRIGHTNESS, 0x00, 0x00),
+// 	RGB(0x00, MAX_BRIGHTNESS, 0x00),
+// 	RGB(0x00, 0x00, MAX_BRIGHTNESS)
+// };
 static const struct led_rgb red = RGB(MAX_BRIGHTNESS, 0x00, 0x00);
 static struct led_rgb bluetoothColor = RGB(0x00, 0x00, MAX_BRIGHTNESS);
 
@@ -104,6 +120,7 @@ static enum STATE nextState(enum STATE currentState) {
 
 void buttonPressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
 	currentState = nextState(currentState);
+	// printk("Press state %i\n", currentState);
 }
 
 
@@ -161,9 +178,114 @@ static void lsm6dsl_trigger_handler(const struct device *dev,
 	}
 }
 
+// BLE characteristics
+#define DEVICE_NAME CONFIG_BT_DEVICE_NAME
+#define DEVICE_LEN (sizeof(DEVICE_NAME)-1)
+
+static void connected(struct bt_conn *conn, uint8_t err)
+{
+	if (err) {
+		printk("Connection failed, err 0x%02x %s\n", err, bt_hci_err_to_str(err));
+	} else {
+		printk("Connected\n");
+	}
+}
+
+static void disconnected(struct bt_conn *conn, uint8_t reason)
+{
+	printk("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
+}
+
+BT_CONN_CB_DEFINE(conn_callbacks) = {
+	.connected = connected,
+	.disconnected = disconnected,
+};
+
+static const struct bt_data ad[] = {
+	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, LED_SERVICE),
+};
+
+static const struct bt_data sd[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
+BT_GATT_SERVICE_DEFINE(led_service,
+	BT_GATT_PRIMARY_SERVICE(RX_CHARACTERISTIC_UUID),
+	BT_GATT_CHARACTERISTIC(LED_SERVICE_UUID,
+			       BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       NULL, on_receive, NULL),
+);
+
+static void bt_ready()
+{
+	int err = 0;
+
+	//Start advertising
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad),
+			      sd, ARRAY_SIZE(sd));
+	if (err) 
+	{
+		printk("Advertising failed to start (err %d)\n", err);
+		return;
+	}
+
+	printk("Advertising successfully started\n");
+	//Initalize services
+	k_sem_give(&ble_init_ok);
+
+}
+
+// void blink()
+// {
+// 	// Setup LED Strip
+// 	if (device_is_ready(strip)) {
+// 		printf("Found LED strip device %s", strip->name);
+// 	} else {
+// 		printf("LED strip device %s is not ready", strip->name);
+// 		return;
+// 	}
+
+// 	while (1) {
+// 		if (update){
+// 			int err = 0;
+// 			// err = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+// 			if (err) {
+// 				printf("couldn't update strip: %d", err);
+// 			}
+// 			update = false;
+// 		}
+
+// 		k_sleep(DELAY_TIME);
+// 	}
+// }
+
 int main(void)
 {
-	int ret;
+	int err = 0;
+
+	err = bt_enable(NULL);
+	if (err) {
+		printk("Bluetooth init failed (err %d)\n", err);
+		return 0;
+	}
+
+	bt_ready();
+	err = k_sem_take(&ble_init_ok, K_MSEC(500));
+
+	if (err) {
+		printk("BLE init did not complete in time");
+		return 0;
+	}
+
+	err = led_service_init();
+
+	if (err) 
+	{
+		printk("Failed to init lightbox (err:%d)\n", err);
+		return 0;
+	}
 
 	const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 	const struct device *const lsm6dsl_dev = DEVICE_DT_GET_ONE(st_lsm6dsl);
@@ -174,22 +296,22 @@ int main(void)
 		return 0;
 	}
 
-	ret = gpio_pin_configure_dt(&enable, GPIO_OUTPUT_ACTIVE);
-	if (ret) {
+	err = gpio_pin_configure_dt(&enable, GPIO_OUTPUT_ACTIVE);
+	if (err) {
 		printf("LED is not configured");
 		return 0;
 	}
 
 	// Setup user push button
-	ret = gpio_pin_configure_dt(&button, (GPIO_INPUT));
-	if (ret) {
-		printk("Error %d: failed to configure button", ret);
+	err = gpio_pin_configure_dt(&button, (GPIO_INPUT));
+	if (err) {
+		printk("Error %d: failed to configure button", err);
 		return 0;
 	}
 
-	ret = gpio_pin_interrupt_configure_dt(&button, ( GPIO_INT_EDGE_TO_ACTIVE));
-	if (ret) {
-		printf("Could not configure sw0 GPIO interrupt (%d)\n", ret);
+	err = gpio_pin_interrupt_configure_dt(&button, ( GPIO_INT_EDGE_TO_ACTIVE));
+	if (err) {
+		printf("Could not configure sw0 GPIO interrupt (%d)\n", err);
 		return 0;
 	}
 
@@ -197,13 +319,13 @@ int main(void)
 	gpio_add_callback(button.port, &button_cb_data);
 	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
 
-	// Setup LED Strip
-	if (device_is_ready(strip)) {
-		printf("Found LED strip device %s", strip->name);
-	} else {
-		printf("LED strip device %s is not ready", strip->name);
-		return 0;
-	}
+	// // Setup LED Strip
+	// if (device_is_ready(strip)) {
+	// 	printf("Found LED strip device %s", strip->name);
+	// } else {
+	// 	printf("LED strip device %s is not ready", strip->name);
+	// 	return 0;
+	// }
 
 
 	// Setup IMU
@@ -219,16 +341,16 @@ int main(void)
 	odr_attr.val1 = 104;
 	odr_attr.val2 = 0;
 
-	ret = sensor_attr_set(lsm6dsl_dev, SENSOR_CHAN_ACCEL_XYZ,
+	err = sensor_attr_set(lsm6dsl_dev, SENSOR_CHAN_ACCEL_XYZ,
 			    SENSOR_ATTR_SAMPLING_FREQUENCY, &odr_attr);
-	if (ret) {
+	if (err) {
 		printk("Cannot set sampling frequency for accelerometer.\n");
 		return 0;
 	}
 
-	ret = sensor_attr_set(lsm6dsl_dev, SENSOR_CHAN_GYRO_XYZ,
+	err = sensor_attr_set(lsm6dsl_dev, SENSOR_CHAN_GYRO_XYZ,
 			    SENSOR_ATTR_SAMPLING_FREQUENCY, &odr_attr);
-	if (ret) {
+	if (err) {
 		printk("Cannot set sampling frequency for gyro.\n");
 		return 0;
 	}
@@ -248,10 +370,20 @@ int main(void)
 		return 0;
 	}
 
+	// bt
+	k_sleep(DELAY_TIME);
+	gpio_pin_set_dt(&enable, GPIO_OUTPUT_ACTIVE);
+	
+					memset(&pixels, 0x00, sizeof(pixels));
+				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+					memcpy(&pixels[cursor], &red, sizeof(struct led_rgb));
+				}
+				update = true;
 	int idx = 0;
 
+	bool btOn = true;
 	printf("Displaying pattern on strip");
-	while (1) {
+	while (1) {		
 		switch(currentState) {
 			case OFF:
 				gpio_pin_set_dt(&enable, GPIO_OUTPUT_INACTIVE);
@@ -260,18 +392,18 @@ int main(void)
 				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
 					memcpy(&pixels[cursor], &(struct led_rgb) RGB(0, 0, 0), sizeof(struct led_rgb));
 				}
-				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
-				if (ret) {
-					printf("couldn't update strip: %d", ret);
+				err = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+				if (err) {
+					printf("couldn't update strip: %d", err);
 				}
-				ret = gpio_pin_interrupt_configure_dt(&button, 	GPIO_INT_LEVEL_ACTIVE);
-				if (ret) {
-					printf("Could not configure sw0 GPIO interrupt (%d)\n", ret);
+				err = gpio_pin_interrupt_configure_dt(&button, 	GPIO_INT_LEVEL_ACTIVE);
+				if (err) {
+					printf("Could not configure sw0 GPIO interrupt (%d)\n", err);
 					return 0;
 				}
 
-				ret = pm_device_action_run(cons, PM_DEVICE_ACTION_SUSPEND);	
-				if (ret) {
+				err = pm_device_action_run(cons, PM_DEVICE_ACTION_SUSPEND);	
+				if (err) {
 					printf("Could not suspend console (%lu)\n", RTC_EVENTS_TICK_EVENTS_TICK_Pos);
 					// return 0;
 				}
@@ -279,45 +411,39 @@ int main(void)
 				sys_poweroff();
 				break;
 			case FIXED:
-				gpio_pin_set_dt(&enable, GPIO_OUTPUT_ACTIVE);
-				memset(&pixels, 0x00, sizeof(pixels));
-				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
-					memcpy(&pixels[cursor], &red, sizeof(struct led_rgb));
-				}
-				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
-				if (ret) {
-					printf("couldn't update strip: %d", ret);
-				}
+				// gpio_pin_set_dt(&enable, GPIO_OUTPUT_ACTIVE);
+
 				break;
 			case BLUETOOTH:
-				memset(&pixels, 0x00, sizeof(pixels));
-				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
-					memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
+				if (get_updated()) {
+					memset(&pixels, 0x00, sizeof(pixels));
+					for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+						memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
+					}
+					// err = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+					// if (err) {
+					// 	printf("couldn't update strip: %d", err);
+					// }
+					update = true;
+
 				}
-				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
-				if (ret) {
-					printf("couldn't update strip: %d", ret);
-				}
+
 				break;
 			case WAVE:
-				memset(&pixels, 0x00, sizeof(pixels));
-				// size_t cursor = 0;
-				// for (; cursor < (idx % STRIP_NUM_PIXELS); cursor++) {
-				// 	memcpy(&pixels[cursor], &colors[idx/STRIP_NUM_PIXELS], sizeof(struct led_rgb));
-				// }
-				// for (; cursor < STRIP_NUM_PIXELS; cursor++) {
-				// 	memcpy(&pixels[cursor], &colors[((idx)/STRIP_NUM_PIXELS + ARRAY_SIZE(colors) - 1) % ARRAY_SIZE(colors)], sizeof(struct led_rgb));
-				// }
+				if (btOn) {
+					bt_le_adv_stop();
+					bt_disable();
 
+					btOn = false;
+				}
+				memset(&pixels, 0x00, sizeof(pixels));
 				for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
 					bluetoothColor = hsv2rgb((cursor + idx) % 360, 100, (MAX_BRIGHTNESS)/255.0 * 100);
 					memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
 				}
 
-				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
-				if (ret) {
-					printf("couldn't update strip: %d", ret);
-				}
+				update = true;
+
 
 				// idx = (idx + 1) % (3 * STRIP_NUM_PIXELS);
 				idx = (idx + 8) % 360;
@@ -336,19 +462,12 @@ int main(void)
 				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
 					memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
 				}
-				ret = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
-				if (ret) {
-					printf("couldn't update strip: %d", ret);
-				}
+				update = true;
 
-				// printf("accel x:%f ms/2 y:%f ms/2 z:%f ms/2",
-				// 							sensor_value_to_double(&accel_x_out),
-				// 							sensor_value_to_double(&accel_y_out),
-				// 							sensor_value_to_double(&accel_z_out));
-				// printf("x:%f,y:%f,z:%f\n",
-				// 			   sensor_value_to_double(&gyro_x_out),
-				// 			   sensor_value_to_double(&gyro_y_out),
-				// 			   sensor_value_to_double(&gyro_z_out));
+				// err = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+				// if (err) {
+				// 	printf("couldn't update strip: %d", err);
+				// }
 
 				// printf("Pitch:%f,Yaw:%f,Roll:%f\n", pitch_out, yaw_out, roll_out);
 				printf("Pitch:%f,Yaw:%f,Roll:%f\n", get_delta_pitch(), get_delta_yaw(), get_delta_roll());
@@ -356,9 +475,19 @@ int main(void)
 				break;
 		}
 		
+		if (update) {
+			err = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
+			if (err) {
+				printf("couldn't update strip: %d", err);
+			}
+			update = false;
+		}
 
 		k_sleep(DELAY_TIME);
 	}
 
 	return 0;
 }
+
+// K_THREAD_DEFINE(blink_id, STACKSIZE, blink, NULL, NULL, NULL,
+// 		PRIORITY, 0, 0);

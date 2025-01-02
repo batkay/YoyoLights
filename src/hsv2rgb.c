@@ -1,4 +1,3 @@
-#pragma once
 #include "hsv2rgb.h"
 #include <math.h>
 
@@ -22,6 +21,7 @@ struct led_rgb hsv2rgb(float H, float S, float V) {
 		case 3: r = p, g = q, b = v; break;
 		case 4: r = t, g = p, b = v; break;
 		case 5: r = v, g = p, b = q; break;
+		default: r = v, g = t, b = p; break;
 	}
 	
 	struct led_rgb color;

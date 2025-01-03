@@ -86,7 +86,7 @@ static char name[MAX_NAME_LENGTH + 1];
 #define RGB(_r, _g, _b) { .r = (_r), .g = (_g), .b = (_b) }
 
 static const struct led_rgb red = RGB(MAX_BRIGHTNESS, 0x00, 0x00);
-static volatile struct led_rgb bluetoothColor = RGB(0x00, 0x00, MAX_BRIGHTNESS);
+static struct led_rgb bluetoothColor = RGB(0x00, 0x00, MAX_BRIGHTNESS);
 
 static struct gpio_callback button_cb_data;
 

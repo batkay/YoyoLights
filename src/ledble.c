@@ -3,7 +3,7 @@
 #include <zephyr/drivers/led_strip.h>
 
 
-static volatile struct led_rgb saved_color;
+static struct led_rgb saved_color;
 static bool updated;
 static bool modified;
 
@@ -46,7 +46,7 @@ ssize_t on_receive_led(struct bt_conn *conn,
 			  uint16_t offset,
 			  uint8_t flags)
 {
-    uint8_t *value = buf;
+    const uint8_t *value = buf;
     if (len != sizeof(saved_color)) {
         return len;
     }

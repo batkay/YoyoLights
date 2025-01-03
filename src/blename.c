@@ -30,7 +30,6 @@ ssize_t on_receive_name(struct bt_conn *conn,
 			  uint16_t offset,
 			  uint8_t flags)
 {
-    uint8_t *value = buf;
     if (len > MAX_NAME_LENGTH) {
         return len;
     }

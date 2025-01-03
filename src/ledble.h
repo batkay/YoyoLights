@@ -11,14 +11,6 @@
 #define LED_SERVICE       0xd4, 0x86, 0x48, 0x24, 0x54, 0xB3, 0x43, 0xA1, \
 			            0xBC, 0x20, 0x97, 0x8F, 0xC3, 0x76, 0xC2, 0x75
 #define LED_SERVICE_UUID       BT_UUID_DECLARE_128(LED_SERVICE)
-// #define LED_SERVICE \
-// 	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef0)
-
-
-// #define RX_CHARACTERISTIC  	BT_UUID_128_ENCODE(0x12345679, 0x1234, 0x5678, 0x5678, 0x56789abcdef0)
-// const struct bt_uuid_128 LED_SERVICE_UUID = BT_UUID_INIT_128(
-// 	LED_SERVICE);
-// const struct bt_uuid_128 RX_CHARACTERISTIC_UUID = BT_UUID_INIT_128(RX_CHARACTERISTIC);
 
 int led_service_init(int r, int g, int b);
 void get_led_data(struct led_rgb *buf);

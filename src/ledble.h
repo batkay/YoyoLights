@@ -24,7 +24,7 @@
 // 	LED_SERVICE);
 // const struct bt_uuid_128 RX_CHARACTERISTIC_UUID = BT_UUID_INIT_128(RX_CHARACTERISTIC);
 
-int led_service_init(void);
+int led_service_init(int r, int g, int b);
 void get_led_data(struct led_rgb *buf);
 bool get_updated();
 ssize_t on_receive(struct bt_conn *conn,

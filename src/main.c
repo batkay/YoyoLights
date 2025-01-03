@@ -29,6 +29,7 @@
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/drivers/flash.h>
 
 
 #include "orientation.h"
@@ -43,6 +44,7 @@
 #else
 #error Unable to determine length of LED strip
 #endif
+#define SPI_FLASH_COMPAT nordic_qspi_nor
 
 /* size of stack area used by each thread */
 #define STACKSIZE 1024
@@ -63,6 +65,7 @@ bool update = false;
 static const struct device *const strip = DEVICE_DT_GET(STRIP_NODE);
 static const struct gpio_dt_spec enable = GPIO_DT_SPEC_GET(LED_ENABLE, gpios);
 static const struct gpio_dt_spec button = GPIO_DT_SPEC_GET_OR(BUTTON0, gpios, {0});
+static const struct device *flash_dev = DEVICE_DT_GET_ONE(SPI_FLASH_COMPAT);
 
 // static struct sensor_value accel_x_out, accel_y_out, accel_z_out;
 // static struct sensor_value gyro_x_out, gyro_y_out, gyro_z_out;
@@ -241,33 +244,41 @@ static void bt_ready()
 
 }
 
-// void blink()
-// {
-// 	// Setup LED Strip
-// 	if (device_is_ready(strip)) {
-// 		printf("Found LED strip device %s", strip->name);
-// 	} else {
-// 		printf("LED strip device %s is not ready", strip->name);
-// 		return;
-// 	}
-
-// 	while (1) {
-// 		if (update){
-// 			int err = 0;
-// 			// err = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
-// 			if (err) {
-// 				printf("couldn't update strip: %d", err);
-// 			}
-// 			update = false;
-// 		}
-
-// 		k_sleep(DELAY_TIME);
-// 	}
-// }
-
 int main(void)
 {
 	int err = 0;
+	// flash
+	if (!device_is_ready(flash_dev)) {
+		printk("%s: flash not ready.\n", flash_dev->name);
+		return 0;
+	}
+
+	uint8_t prevR = 0;
+	uint8_t prevG = 0;
+	uint8_t prevB = MAX_BRIGHTNESS;
+
+
+	uint8_t flash_results[4 + 20];
+
+	err = flash_read(flash_dev, 0, flash_results, 4 + 20);
+	if (err) {
+		printf("Flash read failed! %d\n", err);
+		return 0;
+	}
+	printk("flash: ");
+	for (int i = 0; i < 5; ++i) {
+		printk("%i ", flash_results[i]);
+	}
+	if (flash_results[0]) {
+		// flash not empty
+		prevR = flash_results[1];
+		prevG = flash_results[2];
+		prevB = flash_results[3];
+	}
+	else {
+		printk("Flash empty");
+	}
+
 
 	err = bt_enable(bt_ready);
 	if (err) {
@@ -282,7 +293,7 @@ int main(void)
 		return 0;
 	}
 
-	err = led_service_init();
+	err = led_service_init(prevR, prevG, prevB);
 
 	if (err) 
 	{
@@ -323,12 +334,12 @@ int main(void)
 	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
 
 	// // Setup LED Strip
-	// if (device_is_ready(strip)) {
-	// 	printf("Found LED strip device %s", strip->name);
-	// } else {
-	// 	printf("LED strip device %s is not ready", strip->name);
-	// 	return 0;
-	// }
+	if (device_is_ready(strip)) {
+		printf("Found LED strip device %s", strip->name);
+	} else {
+		printf("LED strip device %s is not ready", strip->name);
+		return 0;
+	}
 
 
 	// Setup IMU
@@ -373,7 +384,7 @@ int main(void)
 		return 0;
 	}
 
-	// bt
+
 	k_sleep(DELAY_TIME);
 	gpio_pin_set_dt(&enable, GPIO_OUTPUT_ACTIVE);
 	
@@ -390,6 +401,8 @@ int main(void)
 		switch(currentState) {
 			case OFF:
 				gpio_pin_set_dt(&enable, GPIO_OUTPUT_INACTIVE);
+
+				
 
 				memset(&pixels, 0x00, sizeof(pixels));
 				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
@@ -410,7 +423,7 @@ int main(void)
 					printf("Could not suspend console (%lu)\n", RTC_EVENTS_TICK_EVENTS_TICK_Pos);
 					// return 0;
 				}
-				printf("Sleep");
+				// printf("Sleep");
 				sys_poweroff();
 				break;
 			case FIXED:
@@ -422,6 +435,21 @@ int main(void)
 					// printf("New Color");
 
 					get_led_data(&bluetoothColor);
+
+					if (bluetoothColor.r > MAX_BRIGHTNESS) {
+						bluetoothColor.r = MAX_BRIGHTNESS;
+					}
+					if (bluetoothColor.g > MAX_BRIGHTNESS) {
+						bluetoothColor.g = MAX_BRIGHTNESS;
+					}
+					if (bluetoothColor.b > MAX_BRIGHTNESS) {
+						bluetoothColor.b = MAX_BRIGHTNESS;
+					}
+
+					flash_results[0] = 1;
+					flash_results[1] = bluetoothColor.r;
+					flash_results[2] = bluetoothColor.g;
+					flash_results[3] = bluetoothColor.b;
 
 					printk("r: %i g: %i b: %i", bluetoothColor.r, bluetoothColor.g, bluetoothColor.b);
 					memset(&pixels, 0x00, sizeof(pixels));
@@ -451,7 +479,19 @@ int main(void)
 				}
 
 				update = true;
+				printf("%i", flash_results[0]);
+				if (flash_results[0]) {
+					err = flash_erase(flash_dev, 0, 4096);
+					if (err) {
+						printk("failed to erase");
+					}
 
+					err = flash_write(flash_dev, 0, flash_results, 4 + 20);
+					if (err) {
+						printf("Flash write failed! %d\n", err);
+					}
+					flash_results[0] = 0;
+				}
 
 				// idx = (idx + 1) % (3 * STRIP_NUM_PIXELS);
 				idx = (idx + 8) % 360;

@@ -6,13 +6,13 @@
 static volatile struct led_rgb saved_color;
 static bool updated;
 
-int led_service_init(void)
+int led_service_init(int r, int g, int b)
 {
     int err = 0;
 
-    saved_color.b = 0x25;
-    saved_color.r = 0;
-    saved_color.g = 0;
+    saved_color.b = b;
+    saved_color.r = r;
+    saved_color.g = g;
     updated = true;
 
     return err;

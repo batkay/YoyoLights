@@ -203,8 +203,9 @@ static void connected(struct bt_conn *conn, uint8_t err)
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	printk("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
-	// bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad),
-	// 		      sd, ARRAY_SIZE(sd));
+	bt_conn_unref(conn);
+	bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	bt_conn_ref(conn);
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {

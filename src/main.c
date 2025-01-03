@@ -35,6 +35,7 @@
 #include "orientation.h"
 #include "hsv2rgb.h"
 #include "ledble.h"
+#include "blename.h"
 
 // Define Devicetree Aliases
 #define STRIP_NODE		DT_ALIAS(led_strip)
@@ -51,6 +52,10 @@
 
 /* scheduling priority used by each thread */
 #define PRIORITY 18
+
+#define RX_CHARACTERISTIC  0xA6, 0xE8, 0xC4, 0x60, 0x7E, 0xAA, 0x41, 0x6B, \
+			                    0x95, 0xD4, 0x9D, 0xCC, 0x08, 0x4F, 0xCF, 0x6A
+#define RX_CHARACTERISTIC_UUID  BT_UUID_DECLARE_128(RX_CHARACTERISTIC)
 
 static K_SEM_DEFINE(ble_init_ok, 0, 1);
 
@@ -74,18 +79,12 @@ static uint32_t prevTimeMs;
 static bool update_values;
 static bool orientationInit;
 
-// static const struct gpio_dt_spec enable =
-// 	GPIO_DT_SPEC_GET_OR(DT_NODELABEL(led_enable), gpios, {0});
+static char name[MAX_NAME_LENGTH + 1];
 
 #define MAX_BRIGHTNESS 0x25
 // Create RGB Colors
 #define RGB(_r, _g, _b) { .r = (_r), .g = (_g), .b = (_b) }
 
-// static const struct led_rgb colors[] = {
-// 	RGB(MAX_BRIGHTNESS, 0x00, 0x00),
-// 	RGB(0x00, MAX_BRIGHTNESS, 0x00),
-// 	RGB(0x00, 0x00, MAX_BRIGHTNESS)
-// };
 static const struct led_rgb red = RGB(MAX_BRIGHTNESS, 0x00, 0x00);
 static volatile struct led_rgb bluetoothColor = RGB(0x00, 0x00, MAX_BRIGHTNESS);
 
@@ -190,7 +189,7 @@ static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, LED_SERVICE),
 };
 
-static const struct bt_data sd[] = {
+static struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
@@ -206,6 +205,15 @@ static void connected(struct bt_conn *conn, uint8_t err)
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	printk("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
+
+	if (get_modified_name()) {
+		get_name(name, MAX_NAME_LENGTH + 1);
+	}
+	sd ->data = name;
+	sd ->data_len = strlen(name);
+
+	// bt_le_adv_stop();
+
 	bt_conn_unref(conn);
 	bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	bt_conn_ref(conn);
@@ -220,9 +228,13 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 BT_GATT_SERVICE_DEFINE(led_service,
 	BT_GATT_PRIMARY_SERVICE(RX_CHARACTERISTIC_UUID),
 	BT_GATT_CHARACTERISTIC(LED_SERVICE_UUID,
-			       BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-			       BT_GATT_PERM_WRITE,
-			       NULL, on_receive, NULL),
+			    	BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+			    	BT_GATT_PERM_WRITE,
+			    	NULL, on_receive_led, NULL),
+	BT_GATT_CHARACTERISTIC(NAME_SERVICE_UUID,
+					BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+			    	BT_GATT_PERM_WRITE,
+			    	NULL, on_receive_name, NULL),
 );
 
 static void bt_ready()
@@ -257,28 +269,42 @@ int main(void)
 	uint8_t prevG = 0;
 	uint8_t prevB = MAX_BRIGHTNESS;
 
+	memcpy(name, &"Yo-Yo", sizeof("Yo-Yo"));
 
-	uint8_t flash_results[4 + 20];
+	uint8_t flash_results[4 + MAX_NAME_LENGTH + 1];
 
-	err = flash_read(flash_dev, 0, flash_results, 4 + 20);
+	err = flash_read(flash_dev, 0, flash_results, 4 + MAX_NAME_LENGTH);
 	if (err) {
 		printf("Flash read failed! %d\n", err);
 		return 0;
 	}
-	printk("flash: ");
-	for (int i = 0; i < 5; ++i) {
-		printk("%i ", flash_results[i]);
-	}
+	// printk("flash: ");
+	// for (int i = 0; i < 5; ++i) {
+	// 	printk("%i ", flash_results[i]);
+	// }
+
 	if (flash_results[0]) {
 		// flash not empty
 		prevR = flash_results[1];
 		prevG = flash_results[2];
 		prevB = flash_results[3];
+
+		if (strlen(&flash_results[4]) > 0) {
+			flash_results[MAX_NAME_LENGTH + 4] ='\0';
+			memcpy(name, &flash_results[4], MAX_NAME_LENGTH + 1);
+			name[MAX_NAME_LENGTH] = '\0';
+			printk("New name ");
+		}
+		
 	}
 	else {
 		printk("Flash empty");
 	}
 
+	printk("%s", name);
+
+	sd ->data = name;
+	sd ->data_len = strlen(name);
 
 	err = bt_enable(bt_ready);
 	if (err) {
@@ -479,14 +505,18 @@ int main(void)
 				}
 
 				update = true;
-				printf("%i", flash_results[0]);
-				if (flash_results[0]) {
+				// printf("%i", flash_results[0]);
+				if (flash_results[0] && (get_modified_led() || get_modified_name())) {
 					err = flash_erase(flash_dev, 0, 4096);
 					if (err) {
 						printk("failed to erase");
 					}
 
-					err = flash_write(flash_dev, 0, flash_results, 4 + 20);
+					if (get_modified_name()) {
+						get_name(&flash_results[4], MAX_NAME_LENGTH + 1);
+					}
+
+					err = flash_write(flash_dev, 0, flash_results, 4 + MAX_NAME_LENGTH);
 					if (err) {
 						printf("Flash write failed! %d\n", err);
 					}

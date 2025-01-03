@@ -5,6 +5,7 @@
 
 static volatile struct led_rgb saved_color;
 static bool updated;
+static bool modified;
 
 int led_service_init(int r, int g, int b)
 {
@@ -14,6 +15,7 @@ int led_service_init(int r, int g, int b)
     saved_color.r = r;
     saved_color.g = g;
     updated = true;
+    modified = false;
 
     return err;
 }
@@ -24,17 +26,20 @@ void get_led_data(struct led_rgb *buf) {
     buf->g = saved_color.g;
     buf->b = saved_color.b;
 }
+
 bool get_updated() {
     if (updated) {
         updated = false;
         return true;
     }
     return false;
-
 }
 
+bool get_modified_led() {
+    return modified;
+}
 
-ssize_t on_receive(struct bt_conn *conn,
+ssize_t on_receive_led(struct bt_conn *conn,
 			  const struct bt_gatt_attr *attr,
 			  const void *buf,
 			  uint16_t len,
@@ -49,7 +54,10 @@ ssize_t on_receive(struct bt_conn *conn,
     saved_color.r = value[1];
     saved_color.g = value[2];
     saved_color.b = value[3];
+
     updated = true;
+    modified = true;
+
     return len;
 }
 

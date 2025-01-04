@@ -34,7 +34,7 @@
 
 #include "orientation.h"
 #include "hsv2rgb.h"
-#include "ledble.h"
+#include "bleled.h"
 #include "blename.h"
 
 // #define DEBUG
@@ -48,12 +48,6 @@
 #error Unable to determine length of LED strip
 #endif
 #define SPI_FLASH_COMPAT nordic_qspi_nor
-
-/* size of stack area used by each thread */
-#define STACKSIZE 1024
-
-/* scheduling priority used by each thread */
-#define PRIORITY 18
 
 #define RX_CHARACTERISTIC  0xA6, 0xE8, 0xC4, 0x60, 0x7E, 0xAA, 0x41, 0x6B, \
 			                    0x95, 0xD4, 0x9D, 0xCC, 0x08, 0x4F, 0xCF, 0x6A
@@ -76,13 +70,11 @@ static const struct device *flash_dev = DEVICE_DT_GET_ONE(SPI_FLASH_COMPAT);
 const struct device *const lsm6dsl_dev = DEVICE_DT_GET_ONE(st_lsm6dsl);
 const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 
-// static struct sensor_value accel_x_out, accel_y_out, accel_z_out;
-// static struct sensor_value gyro_x_out, gyro_y_out, gyro_z_out;
 static uint32_t prevTimeMs;
-// static double pitch_out, yaw_out, roll_out;
+
 static bool update_values;
 static bool orientationInit;
-
+struct bt_conn* currConn;
 static char name[MAX_NAME_LENGTH + 1];
 
 #define MAX_BRIGHTNESS 0x25
@@ -97,10 +89,10 @@ static struct gpio_callback button_cb_data;
 static struct led_rgb pixels[STRIP_NUM_PIXELS];
 
 enum STATE {
-	OFF, FIXED, BLUETOOTH, WAVE, IMU
+	OFF, BLUETOOTH, FIXED, WAVE, IMU
 };
 
-volatile enum STATE currentState = FIXED;
+volatile enum STATE currentState = BLUETOOTH;
 
 
 static enum STATE nextState(enum STATE currentState) {
@@ -108,10 +100,10 @@ static enum STATE nextState(enum STATE currentState) {
 		case OFF:
 			return FIXED;
 			break;
-		case FIXED:
-			return BLUETOOTH;
-			break;
 		case BLUETOOTH:
+			return FIXED;
+			break;
+		case FIXED:
 			return WAVE;
 			break;
 		case WAVE:
@@ -196,6 +188,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 		printk("Connected\n");
 	}
 	#endif
+	currConn = conn;
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -215,6 +208,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	bt_conn_unref(conn);
 	bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	bt_conn_ref(conn);
+	currConn = NULL;
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
@@ -256,6 +250,40 @@ static void bt_ready()
 	//Initalize services
 	k_sem_give(&ble_init_ok);
 
+}
+
+static void disconnect_device(struct bt_conn *conn, void *user_data)
+{
+    int err;
+    struct bt_conn_info info;
+
+	/* Check if the connection is still active */
+    /* Retrieve connection information */
+    err = bt_conn_get_info(conn, &info);
+    if (err) {
+		#ifdef DEBUG
+        printk("Failed to get connection info: %d\n", err);
+		#endif
+        return;
+    }
+
+    /* Check if the connection is in the connected state */
+    if (info.state != BT_CONN_STATE_CONNECTED || info.state != BT_CONN_STATE_CONNECTING) {
+		#ifdef DEBUG
+        printk("Device already disconnected or in invalid state\n");
+		#endif
+        return;
+    }
+
+    /* Disconnect the device */
+    err = bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+	#ifdef DEBUG
+    if (err) {
+        printk("Failed to disconnect device: %d\n", err);
+    } else {
+        printk("Device disconnected successfully\n");
+    }
+	#endif
 }
 
 int main(void)
@@ -450,14 +478,10 @@ int main(void)
 	k_sleep(DELAY_TIME);
 	gpio_pin_set_dt(&enable, GPIO_OUTPUT_ACTIVE);
 	
-	memset(&pixels, 0x00, sizeof(pixels));
-	for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
-		memcpy(&pixels[cursor], &red, sizeof(struct led_rgb));
-	}
-	update = true;
 	int idx = 0;
 
-	bool btOn = true;
+	bool btOn1 = true;
+	bool btOn2 = true;
 	#ifdef DEBUG
 	printf("Displaying pattern on strip");
 	#endif
@@ -465,8 +489,6 @@ int main(void)
 		switch(currentState) {
 			case OFF:
 				gpio_pin_set_dt(&enable, GPIO_OUTPUT_INACTIVE);
-
-				
 
 				memset(&pixels, 0x00, sizeof(pixels));
 				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
@@ -494,10 +516,6 @@ int main(void)
 				}
 				sys_poweroff();
 				break;
-			case FIXED:
-				// Do nothing
-
-				break;
 			case BLUETOOTH:
 				if (get_updated()) {
 
@@ -524,21 +542,39 @@ int main(void)
 					for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
 						memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
 					}
-					// err = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
-					// if (err) {
-					// 	printf("couldn't update strip: %d", err);
-					// }
 					update = true;
 
 				}
 
 				break;
-			case WAVE:
-				if (btOn) {
+			case FIXED:
+				// Do nothing
+				if (btOn1) {
+					if (currConn) {
+						err = bt_conn_disconnect(currConn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+						if (err) {
+							printk("Failed to disconnect device: %d\n", err);
+						} else {
+							printk("Device disconnected successfully\n");
+						}
+					}
+					bt_conn_foreach(BT_CONN_TYPE_LE, disconnect_device, NULL);
 					bt_le_adv_stop();
-					bt_disable();
 
-					btOn = false;
+
+					btOn1 = false;
+
+					memset(&pixels, 0x00, sizeof(pixels));
+					for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+						memcpy(&pixels[cursor], &red, sizeof(struct led_rgb));
+					}
+					update = true;
+				}
+				break;
+			case WAVE:
+				if (btOn2) {
+					bt_disable();
+					btOn2 = false;
 				}
 				memset(&pixels, 0x00, sizeof(pixels));
 				for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
@@ -547,7 +583,6 @@ int main(void)
 				}
 
 				update = true;
-				// printf("%i", flash_results[0]);
 				if (flash_results[0] && (get_modified_led() || get_modified_name())) {
 					err = flash_erase(flash_dev, 0, 4096);
 					if (err) {
@@ -610,6 +645,3 @@ int main(void)
 
 	return 0;
 }
-
-// K_THREAD_DEFINE(blink_id, STACKSIZE, blink, NULL, NULL, NULL,
-// 		PRIORITY, 0, 0);

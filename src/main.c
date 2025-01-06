@@ -49,8 +49,8 @@
 #endif
 #define SPI_FLASH_COMPAT nordic_qspi_nor
 
-#define RX_CHARACTERISTIC  0xA6, 0xE8, 0xC4, 0x60, 0x7E, 0xAA, 0x41, 0x6B, \
-			                    0x95, 0xD4, 0x9D, 0xCC, 0x08, 0x4F, 0xCF, 0x6A
+#define RX_CHARACTERISTIC  0x94, 0xF5, 0x56, 0x67, 0x86, 0x49, 0x1D, 0xA4, \
+			                    0x34, 0x41, 0x32, 0x69, 0x00, 0x0D, 0x9F, 0x9D
 #define RX_CHARACTERISTIC_UUID  BT_UUID_DECLARE_128(RX_CHARACTERISTIC)
 
 static K_SEM_DEFINE(ble_init_ok, 0, 1);
@@ -171,7 +171,7 @@ static uint8_t mfg_data[] = { 'B', 'a', 't', 'k', 'a', 'y' };
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL, LED_SERVICE),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, RX_CHARACTERISTIC),
 	BT_DATA(BT_DATA_MANUFACTURER_DATA, mfg_data, 6),
 };
 

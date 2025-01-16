@@ -22,3 +22,5 @@ ssize_t on_receive_led(struct bt_conn *conn,
 			  uint16_t len,
 			  uint16_t offset,
 			  uint8_t flags);
+ssize_t read_led(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			void *buf, uint16_t len, uint16_t offset);

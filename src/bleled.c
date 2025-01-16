@@ -3,7 +3,7 @@
 #include <zephyr/drivers/led_strip.h>
 
 
-static struct led_rgb saved_color;
+struct led_rgb saved_color;
 static bool updated;
 static bool modified;
 
@@ -46,14 +46,19 @@ ssize_t on_receive_led(struct bt_conn *conn,
 			  uint16_t offset,
 			  uint8_t flags)
 {
-    const uint8_t *value = buf;
+    const uint8_t *value = attr->user_data;
     if (len != sizeof(saved_color)) {
-        return len;
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
-    // memcpy(&saved_color, value, sizeof(saved_color));
-    saved_color.r = value[1];
-    saved_color.g = value[2];
-    saved_color.b = value[3];
+    // // memcpy(&saved_color, value, sizeof(saved_color));
+    // saved_color.r = value[1];
+    // saved_color.g = value[2];
+    // saved_color.b = value[3];
+
+    // uint8_t *value = attr->user_data;
+
+	memcpy(value + offset, buf, len);
+	// value[offset + len] = 0;
 
     updated = true;
     modified = true;
@@ -61,3 +66,11 @@ ssize_t on_receive_led(struct bt_conn *conn,
     return len;
 }
 
+ssize_t read_led(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			void *buf, uint16_t len, uint16_t offset)
+{
+	const char *value = attr->user_data;
+
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, value,
+				 sizeof(struct led_rgb));
+}

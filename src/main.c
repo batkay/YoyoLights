@@ -93,7 +93,7 @@ enum STATE {
 };
 
 volatile enum STATE currentState = BLUETOOTH;
-
+static bool bleOn = false;
 
 static enum STATE nextState(enum STATE currentState) {
 	switch(currentState){
@@ -188,6 +188,9 @@ static void connected(struct bt_conn *conn, uint8_t err)
 		printk("Connected\n");
 	}
 	#endif
+	if (!bleOn) {
+		bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+	}
 	currConn = conn;
 }
 
@@ -217,16 +220,33 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 };
 
 
+// BT_GATT_SERVICE_DEFINE(led_service,
+// 	BT_GATT_PRIMARY_SERVICE(RX_CHARACTERISTIC_UUID),
+// 	BT_GATT_CHARACTERISTIC(LED_SERVICE_UUID,
+// 			    	BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+// 			    	BT_GATT_PERM_WRITE,
+// 			    	NULL, on_receive_led, NULL),
+// 	BT_GATT_CHARACTERISTIC(NAME_SERVICE_UUID,
+// 					BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+// 			    	BT_GATT_PERM_WRITE,
+// 			    	NULL, on_receive_name, NULL),
+// );
+
 BT_GATT_SERVICE_DEFINE(led_service,
 	BT_GATT_PRIMARY_SERVICE(RX_CHARACTERISTIC_UUID),
 	BT_GATT_CHARACTERISTIC(LED_SERVICE_UUID,
-			    	BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-			    	BT_GATT_PERM_WRITE,
-			    	NULL, on_receive_led, NULL),
-	BT_GATT_CHARACTERISTIC(NAME_SERVICE_UUID,
-					BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-			    	BT_GATT_PERM_WRITE,
-			    	NULL, on_receive_name, NULL),
+				BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_EXT_PROP,
+				BT_GATT_PERM_READ | BT_GATT_PERM_WRITE | BT_GATT_PERM_PREPARE_WRITE,
+				read_led, on_receive_led, &bluetoothColor),
+	BT_GATT_CHARACTERISTIC(NAME_SERVICE_UUID, 
+					BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_EXT_PROP,
+					BT_GATT_PERM_READ | BT_GATT_PERM_WRITE |
+			       	BT_GATT_PERM_PREPARE_WRITE,
+			       	read_name, on_receive_name, &name),
+	// BT_GATT_CHARACTERISTIC(NAME_SERVICE_UUID,
+	// 				BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+	// 		    	BT_GATT_PERM_WRITE,
+	// 		    	NULL, on_receive_name, NULL),
 );
 
 static void bt_ready()
@@ -460,14 +480,15 @@ int main(void)
 	trig.type = SENSOR_TRIG_DATA_READY;
 	trig.chan = SENSOR_CHAN_ACCEL_XYZ;
 
-	if (sensor_trigger_set(lsm6dsl_dev, &trig, lsm6dsl_trigger_handler) != 0) {
+	err = sensor_trigger_set(lsm6dsl_dev, &trig, lsm6dsl_trigger_handler);
+	if (err) {
 		#ifdef DEBUG
 		printk("Could not set sensor type and channel\n");
 		#endif
 		return 0;
 	}
-
-	if (sensor_sample_fetch(lsm6dsl_dev) < 0) {
+	err = sensor_sample_fetch(lsm6dsl_dev);
+	if (err) {
 		#ifdef DEBUG
 		printk("Sensor sample update error\n");
 		#endif
@@ -482,6 +503,8 @@ int main(void)
 
 	bool btOn1 = true;
 	bool btOn2 = true;
+	bleOn = true;
+	bool sensorInit = false;
 	#ifdef DEBUG
 	printf("Displaying pattern on strip");
 	#endif
@@ -491,7 +514,7 @@ int main(void)
 				gpio_pin_set_dt(&enable, GPIO_OUTPUT_INACTIVE);
 
 				memset(&pixels, 0x00, sizeof(pixels));
-				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+				for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
 					memcpy(&pixels[cursor], &(struct led_rgb) RGB(0, 0, 0), sizeof(struct led_rgb));
 				}
 				err = led_strip_update_rgb(strip, pixels, STRIP_NUM_PIXELS);
@@ -539,7 +562,7 @@ int main(void)
 					printk("r: %i g: %i b: %i", bluetoothColor.r, bluetoothColor.g, bluetoothColor.b);
 					#endif
 					memset(&pixels, 0x00, sizeof(pixels));
-					for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+					for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
 						memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
 					}
 					update = true;
@@ -561,11 +584,11 @@ int main(void)
 					bt_conn_foreach(BT_CONN_TYPE_LE, disconnect_device, NULL);
 					bt_le_adv_stop();
 
-
+					bleOn = false;
 					btOn1 = false;
 
 					memset(&pixels, 0x00, sizeof(pixels));
-					for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+					for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
 						memcpy(&pixels[cursor], &red, sizeof(struct led_rgb));
 					}
 					update = true;
@@ -608,6 +631,9 @@ int main(void)
 				idx = (idx + 8) % 360;
 				break;
 			case IMU:
+				if (!sensorInit) {
+					sensorInit = true;
+				}
 				double rotation_magnitude = sqrt(pow(get_delta_pitch(), 2) + pow(get_delta_roll(), 2));
 				
 				if (rotation_magnitude > 1) {
@@ -618,7 +644,7 @@ int main(void)
 				bluetoothColor = hsv2rgb(idx, 100, (MAX_BRIGHTNESS)/255.0 * 100);
 
 				memset(&pixels, 0x00, sizeof(pixels));
-				for (size_t cursor = 0; cursor < ARRAY_SIZE(pixels); cursor++) {
+				for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
 					memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
 				}
 				update = true;

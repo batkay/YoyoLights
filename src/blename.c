@@ -30,16 +30,30 @@ ssize_t on_receive_name(struct bt_conn *conn,
 			  uint16_t offset,
 			  uint8_t flags)
 {
-    if (len > MAX_NAME_LENGTH) {
-        return len;
-    }
+	uint8_t *value = attr->user_data;
 
-    memcpy(name, buf, len);
-    name[len + 1] = '\0';
-    name[MAX_NAME_LENGTH] = '\0';
+	if (flags & BT_GATT_WRITE_FLAG_PREPARE) {
+		return 0;
+	}
 
+	if (offset + len > MAX_NAME_LENGTH) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+	}
+
+	memcpy(value + offset, buf, len);
+    
+    value[len + 1] = '\0';
+	value[MAX_NAME_LENGTH + 1] = '\0';
     initialized = true;
 
-    return len;
+	return len;
 }
 
+ssize_t read_name(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+			void *buf, uint16_t len, uint16_t offset)
+{
+	const char *value = attr->user_data;
+
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, value,
+				 strlen(value));
+}

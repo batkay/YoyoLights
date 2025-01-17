@@ -380,6 +380,9 @@ int main(void)
 	}
 
 	err = led_service_init(prevR, prevG, prevB);
+	bluetoothColor.r = prevR;
+	bluetoothColor.g = prevG;
+	bluetoothColor.b = prevB;
 
 	if (err) {
 		#ifdef DEBUG
@@ -542,7 +545,7 @@ int main(void)
 			case BLUETOOTH:
 				if (get_updated()) {
 
-					get_led_data(&bluetoothColor);
+					// get_led_data(&bluetoothColor);
 
 					if (bluetoothColor.r > MAX_BRIGHTNESS) {
 						bluetoothColor.r = MAX_BRIGHTNESS;
@@ -599,13 +602,7 @@ int main(void)
 					bt_disable();
 					btOn2 = false;
 				}
-				memset(&pixels, 0x00, sizeof(pixels));
-				for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
-					bluetoothColor = hsv2rgb((cursor + idx) % 360, 100, (MAX_BRIGHTNESS)/255.0 * 100);
-					memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
-				}
 
-				update = true;
 				if (flash_results[0] && (get_modified_led() || get_modified_name())) {
 					err = flash_erase(flash_dev, 0, 4096);
 					if (err) {
@@ -613,10 +610,14 @@ int main(void)
 						printk("failed to erase");
 						#endif
 					}
-
-					if (get_modified_name()) {
-						get_name(&flash_results[4], MAX_NAME_LENGTH + 1);
-					}
+					flash_results[0] = 1;
+					flash_results[1] = bluetoothColor.r;
+					flash_results[2] = bluetoothColor.g;
+					flash_results[3] = bluetoothColor.b;
+					// if (get_modified_name()) {
+					// 	get_name(&flash_results[4], MAX_NAME_LENGTH + 1);
+					// }
+					memcpy(&flash_results[4], name, MAX_NAME_LENGTH + 1);
 
 					err = flash_write(flash_dev, 0, flash_results, 4 + MAX_NAME_LENGTH);
 					if (err) {
@@ -624,9 +625,16 @@ int main(void)
 						printf("Flash write failed! %d\n", err);
 						#endif
 					}
+					printf("Flash written");
 					flash_results[0] = 0;
 				}
-
+				
+				memset(&pixels, 0x00, sizeof(pixels));
+				for (size_t cursor = 0; cursor < STRIP_NUM_PIXELS; cursor++) {
+					bluetoothColor = hsv2rgb((cursor + idx) % 360, 100, (MAX_BRIGHTNESS)/255.0 * 100);
+					memcpy(&pixels[cursor], &bluetoothColor, sizeof(struct led_rgb));
+				}
+				update = true;
 				// idx = (idx + 1) % (3 * STRIP_NUM_PIXELS);
 				idx = (idx + 8) % 360;
 				break;

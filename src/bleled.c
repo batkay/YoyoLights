@@ -46,7 +46,7 @@ ssize_t on_receive_led(struct bt_conn *conn,
 			  uint16_t offset,
 			  uint8_t flags)
 {
-    const uint8_t *value = attr->user_data;
+    uint8_t *value = attr->user_data;
     if (len != sizeof(saved_color)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }

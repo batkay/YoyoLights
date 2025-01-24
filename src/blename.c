@@ -1,3 +1,6 @@
+/***
+ * Takes care of name bluetooth characteristic. Updates to name here will change advertising name
+ */
 #include "blename.h"
 
 #include <zephyr/drivers/led_strip.h>

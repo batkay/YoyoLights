@@ -49,6 +49,7 @@
 #endif
 #define SPI_FLASH_COMPAT nordic_qspi_nor
 
+// define bluetooth characteristic UUID
 #define RX_CHARACTERISTIC  0x94, 0xF5, 0x56, 0x67, 0x86, 0x49, 0x1D, 0xA4, \
 			                    0x34, 0x41, 0x32, 0x69, 0x00, 0x0D, 0x9F, 0x9D
 #define RX_CHARACTERISTIC_UUID  BT_UUID_DECLARE_128(RX_CHARACTERISTIC)
@@ -72,7 +73,6 @@ const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 
 static uint32_t prevTimeMs;
 
-static bool update_values;
 static bool orientationInit;
 struct bt_conn* currConn;
 static char name[MAX_NAME_LENGTH + 1];
@@ -116,11 +116,12 @@ static enum STATE nextState(enum STATE currentState) {
 	return FIXED;
 }
 
+// button callback to switch states
 void buttonPressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
 	currentState = nextState(currentState);
 }
 
-
+// Sensor callbacks to update position
 static void lsm6dsl_trigger_handler(const struct device *dev,
 				    const struct sensor_trigger *trig)
 {
@@ -157,10 +158,6 @@ static void lsm6dsl_trigger_handler(const struct device *dev,
 	}
 
 	prevTimeMs = currTimeMs;
-
-	if (update_values) {
-		update_values = false;
-	}
 }
 
 // BLE characteristics
@@ -179,6 +176,7 @@ static struct bt_data sd[] = {
 	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
+// bluetooth connection callback
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	#ifdef DEBUG
@@ -194,6 +192,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	currConn = conn;
 }
 
+// bluetooth disconnect callback
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	#ifdef DEBUG
@@ -219,19 +218,7 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 	.disconnected = disconnected,
 };
 
-
-// BT_GATT_SERVICE_DEFINE(led_service,
-// 	BT_GATT_PRIMARY_SERVICE(RX_CHARACTERISTIC_UUID),
-// 	BT_GATT_CHARACTERISTIC(LED_SERVICE_UUID,
-// 			    	BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-// 			    	BT_GATT_PERM_WRITE,
-// 			    	NULL, on_receive_led, NULL),
-// 	BT_GATT_CHARACTERISTIC(NAME_SERVICE_UUID,
-// 					BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-// 			    	BT_GATT_PERM_WRITE,
-// 			    	NULL, on_receive_name, NULL),
-// );
-
+// Define bluetooth characteristics
 BT_GATT_SERVICE_DEFINE(led_service,
 	BT_GATT_PRIMARY_SERVICE(RX_CHARACTERISTIC_UUID),
 	BT_GATT_CHARACTERISTIC(LED_SERVICE_UUID,
@@ -243,12 +230,9 @@ BT_GATT_SERVICE_DEFINE(led_service,
 					BT_GATT_PERM_READ | BT_GATT_PERM_WRITE |
 			       	BT_GATT_PERM_PREPARE_WRITE,
 			       	read_name, on_receive_name, &name),
-	// BT_GATT_CHARACTERISTIC(NAME_SERVICE_UUID,
-	// 				BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-	// 		    	BT_GATT_PERM_WRITE,
-	// 		    	NULL, on_receive_name, NULL),
 );
 
+// Initialize bluetooth
 static void bt_ready()
 {
 	int err = 0;
@@ -272,6 +256,7 @@ static void bt_ready()
 
 }
 
+// test method to try disconnecting all connected devices
 static void disconnect_device(struct bt_conn *conn, void *user_data)
 {
     int err;
@@ -309,7 +294,7 @@ static void disconnect_device(struct bt_conn *conn, void *user_data)
 int main(void)
 {
 	int err = 0;
-	// flash
+	// read flash
 	if (!device_is_ready(flash_dev)) {
 		#ifdef DEBUG
 		printk("%s: flash not ready.\n", flash_dev->name);
@@ -362,6 +347,7 @@ int main(void)
 	sd ->data = name;
 	sd ->data_len = strlen(name);
 
+	// enable bluetooth
 	err = bt_enable(bt_ready);
 	if (err) {
 		#ifdef DEBUG
@@ -370,6 +356,7 @@ int main(void)
 		return 0;
 	}
 
+	// wait for BT to init
 	err = k_sem_take(&ble_init_ok, K_MSEC(500));
 
 	if (err) {
@@ -574,7 +561,8 @@ int main(void)
 
 				break;
 			case FIXED:
-				// Do nothing
+				// Jank solution to disconnect all BT before turning it off.
+				// Improves consistency for some reason
 				if (btOn1) {
 					if (currConn) {
 						err = bt_conn_disconnect(currConn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
@@ -603,6 +591,7 @@ int main(void)
 					btOn2 = false;
 				}
 
+				// write to flash
 				if (flash_results[0] && (get_modified_led() || get_modified_name())) {
 					err = flash_erase(flash_dev, 0, 4096);
 					if (err) {
@@ -625,7 +614,9 @@ int main(void)
 						printf("Flash write failed! %d\n", err);
 						#endif
 					}
+					#ifdef DEBUG
 					printf("Flash written");
+					#endif
 					flash_results[0] = 0;
 				}
 				
@@ -660,7 +651,6 @@ int main(void)
 				#ifdef DEBUG
 				printf("Pitch:%f,Yaw:%f,Roll:%f\n", get_delta_pitch(), get_delta_yaw(), get_delta_roll());
 				#endif
-				update_values = true;
 				break;
 		}
 		

@@ -1,3 +1,6 @@
+/***
+ * Characteristic to handle colors. Updates will show up on LED in bluetooth state
+ */
 #include "bleled.h"
 
 #include <zephyr/drivers/led_strip.h>

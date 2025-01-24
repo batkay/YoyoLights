@@ -1,3 +1,6 @@
+/***
+ * Copied off internet hsv2rgb method
+ */
 #include "hsv2rgb.h"
 #include <math.h>
 
